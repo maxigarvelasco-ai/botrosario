@@ -16,6 +16,7 @@ env/
 !.env.example
 *.key.json
 serviceAccountKey.json
+nuevaClavePrivada.json
 
 # Logs and local artifacts
 *.log
