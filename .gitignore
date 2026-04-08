@@ -21,6 +21,7 @@ nuevaClavePrivada.json
 # Logs and local artifacts
 *.log
 *.tmp
+*.traineddata
 .DS_Store
 Thumbs.db
 npm-debug.log*
