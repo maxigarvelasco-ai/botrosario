@@ -1,6 +1,8 @@
 const { admin, getDb } = require("./firebase");
+const crypto = require("crypto");
 
 const IG_POSTS_COLLECTION = "ig_posts_raw";
+const EVENTS_COLLECTION = String(process.env.FIRESTORE_EVENTS_COLLECTION || "events").trim() || "events";
 
 function asNullableString(value) {
   if (value === undefined || value === null) {
@@ -171,6 +173,85 @@ function normalizeInstagramItem(item) {
   };
 }
 
+function normalizeToken(value) {
+  const base = asNullableString(value);
+  if (!base) {
+    return null;
+  }
+  return base
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "") || null;
+}
+
+function toUniqueStringArray(value) {
+  if (!Array.isArray(value)) {
+    return [];
+  }
+  const out = [];
+  const seen = new Set();
+  for (const item of value) {
+    const clean = asNullableString(item);
+    if (!clean) {
+      continue;
+    }
+    const key = clean.toLowerCase();
+    if (seen.has(key)) {
+      continue;
+    }
+    seen.add(key);
+    out.push(clean);
+  }
+  return out;
+}
+
+function buildEventHash(event) {
+  const signature = [
+    normalizeToken(event.categoria) || "sin_categoria",
+    normalizeToken(event.fecha_text) || "sin_fecha",
+    normalizeToken(event.hora) || "sin_hora",
+    normalizeToken(event.ciudad) || "sin_ciudad",
+    normalizeToken(event.lugar) || "sin_lugar",
+    normalizeToken(event.event_date) || "sin_event_date",
+    normalizeToken(event.tipo_norm) || "sin_tipo",
+    normalizeToken(event.artista_norm) || "sin_artista",
+  ].join("|");
+
+  return crypto.createHash("sha1").update(signature, "utf8").digest("hex");
+}
+
+function normalizeEventForStorage(event) {
+  const payload = event && typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+
+  const categoria = asNullableString(event.categoria) || "sin_categoria";
+  const ciudad = asNullableString(event.ciudad) || "Rosario";
+  const lugar = asNullableString(event.lugar);
+  const tipoNorm = normalizeToken(event.tipo_norm || event.tipo) || "evento";
+  const artistaNorm = normalizeToken(event.artista_norm || event.artista || event.artista_o_show);
+  const categoryNorm = normalizeToken(event.category_norm || categoria) || "sin_categoria";
+  const ciudadNorm = normalizeToken(event.ciudad_norm || ciudad) || "rosario";
+  const lugarNorm = normalizeToken(event.lugar_norm || lugar);
+
+  return {
+    categoria,
+    fecha_text: asNullableString(event.fecha_text || event.fecha),
+    hora: asNullableString(event.hora),
+    ciudad,
+    lugar,
+    event_date: asNullableString(event.event_date),
+    payload,
+    category_norm: categoryNorm,
+    ciudad_norm: ciudadNorm,
+    lugar_norm: lugarNorm,
+    tipo_norm: tipoNorm,
+    artista_norm: artistaNorm,
+    is_free: Boolean(event.is_free),
+    tags: toUniqueStringArray(event.tags || []),
+  };
+}
+
 async function saveRawInstagramPost(item) {
   const docId = getPostDocId(item);
   if (!docId) {
@@ -265,10 +346,192 @@ async function saveRawInstagramPosts(items) {
   return summary;
 }
 
+async function getPendingInstagramPosts(limit = 10) {
+  const db = getDb();
+  const safeLimit = Math.max(1, Math.min(50, Number(limit) || 10));
+  const query = db.collection(IG_POSTS_COLLECTION).where("ocrStatus", "==", "pending").limit(safeLimit);
+  const snapshot = await query.get();
+
+  return snapshot.docs.map((doc) => ({
+    postId: doc.id,
+    ...doc.data(),
+  }));
+}
+
+async function markPostProcessing(postId) {
+  const cleanPostId = asNullableString(postId);
+  if (!cleanPostId) {
+    throw new Error("markPostProcessing requires postId");
+  }
+
+  const db = getDb();
+  const ref = db.collection(IG_POSTS_COLLECTION).doc(cleanPostId);
+
+  return db.runTransaction(async (tx) => {
+    const snapshot = await tx.get(ref);
+    if (!snapshot.exists) {
+      return false;
+    }
+
+    const data = snapshot.data() || {};
+    const currentStatus = asNullableString(data.ocrStatus) || "pending";
+    if (currentStatus !== "pending") {
+      return false;
+    }
+
+    tx.set(
+      ref,
+      {
+        ocrStatus: "processing",
+        ocrError: null,
+        ocrUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+        updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      },
+      { merge: true }
+    );
+    return true;
+  });
+}
+
+async function markPostError(postId, error) {
+  const cleanPostId = asNullableString(postId);
+  if (!cleanPostId) {
+    throw new Error("markPostError requires postId");
+  }
+
+  const message =
+    error && error.message ? String(error.message) : asNullableString(error) || "unknown_error";
+
+  const db = getDb();
+  const ref = db.collection(IG_POSTS_COLLECTION).doc(cleanPostId);
+  await ref.set(
+    {
+      ocrStatus: "error",
+      ocrError: message.slice(0, 1200),
+      ocrUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+async function updatePostParsedEvents(postId, eventIds) {
+  const cleanPostId = asNullableString(postId);
+  if (!cleanPostId) {
+    throw new Error("updatePostParsedEvents requires postId");
+  }
+
+  const ids = toUniqueStringArray(eventIds || []);
+
+  const db = getDb();
+  const ref = db.collection(IG_POSTS_COLLECTION).doc(cleanPostId);
+  await ref.set(
+    {
+      parsedEventIds: ids,
+      parsedEventsCount: ids.length,
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+async function markPostDone(postId, data = {}) {
+  const cleanPostId = asNullableString(postId);
+  if (!cleanPostId) {
+    throw new Error("markPostDone requires postId");
+  }
+
+  const ids = toUniqueStringArray(data.parsedEventIds || []);
+  const ocrText = asNullableString(data.ocrText);
+
+  const payload = {
+    ocrStatus: "done",
+    ocrError: null,
+    ocrText: ocrText || null,
+    parsedEventIds: ids,
+    parsedEventsCount: ids.length,
+    ocrUpdatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+  };
+
+  if (data.ocrMeta && typeof data.ocrMeta === "object") {
+    payload.ocrMeta = data.ocrMeta;
+  }
+
+  const db = getDb();
+  const ref = db.collection(IG_POSTS_COLLECTION).doc(cleanPostId);
+  await ref.set(payload, { merge: true });
+}
+
+async function upsertEvents(events) {
+  if (!Array.isArray(events)) {
+    throw new Error("upsertEvents expects an array");
+  }
+
+  const db = getDb();
+  const summary = {
+    received: events.length,
+    upserted: 0,
+    created: 0,
+    updated: 0,
+    failed: 0,
+    eventIds: [],
+    errors: [],
+  };
+
+  for (let index = 0; index < events.length; index += 1) {
+    try {
+      const normalized = normalizeEventForStorage(events[index] || {});
+      const eventHash = buildEventHash(normalized);
+      const ref = db.collection(EVENTS_COLLECTION).doc(eventHash);
+
+      const isCreated = await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+
+        const payload = {
+          event_hash: eventHash,
+          ...normalized,
+          updated_at: admin.firestore.FieldValue.serverTimestamp(),
+        };
+
+        if (!snap.exists) {
+          payload.created_at = admin.firestore.FieldValue.serverTimestamp();
+        }
+
+        tx.set(ref, payload, { merge: true });
+        return !snap.exists;
+      });
+
+      summary.upserted += 1;
+      summary.eventIds.push(eventHash);
+      if (isCreated) {
+        summary.created += 1;
+      } else {
+        summary.updated += 1;
+      }
+    } catch (error) {
+      summary.failed += 1;
+      const message =
+        error && error.message ? error.message : String(error || "unknown_event_upsert_error");
+      summary.errors.push(`index=${index} error=${message}`);
+    }
+  }
+
+  return summary;
+}
+
 module.exports = {
+  buildEventHash,
   getPostDocId,
+  getPendingInstagramPosts,
+  markPostDone,
+  markPostError,
+  markPostProcessing,
   normalizeInstagramItem,
+  normalizeEventForStorage,
   saveRawInstagramPost,
   saveRawInstagramPosts,
+  updatePostParsedEvents,
+  upsertEvents,
   tryGetBestEffortDocHint,
 };

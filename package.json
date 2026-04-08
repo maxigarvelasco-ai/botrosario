@@ -5,7 +5,9 @@
   "description": "Railway backend for Apify Instagram webhook -> Firestore",
   "main": "src/index.js",
   "scripts": {
-    "start": "node src/index.js"
+    "start": "node src/index.js",
+    "process:ig-posts": "node src/processPendingInstagramPosts.js",
+    "process:ig-posts:loop": "node src/processPendingInstagramPostsLoop.js"
   },
   "engines": {
     "node": ">=18"
@@ -13,6 +15,7 @@
   "dependencies": {
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
-    "firebase-admin": "^13.0.1"
+    "firebase-admin": "^13.0.1",
+    "tesseract.js": "^5.1.1"
   }
 }
