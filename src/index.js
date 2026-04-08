@@ -7,43 +7,34 @@ const { fetchDatasetItems } = require("./apify");
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-function asDatasetId(value) {
-  if (value === undefined || value === null) {
-    return null;
-  }
-  const out = String(value).trim();
-  return out.length ? out : null;
-}
-
 app.get("/health", (_req, res) => {
   return res.status(200).send("ok");
 });
 
-app.post("/webhooks/apify/instagram", (req, res) => {
-  const datasetId = asDatasetId(req?.body?.datasetId);
-  if (!datasetId) {
-    return res.status(400).json({
-      ok: false,
-      error: "invalid_payload",
-      message: "datasetId is required",
-    });
+app.post("/webhooks/apify/instagram", async (req, res) => {
+  const datasetId = req.body?.datasetId;
+
+  console.log("[apify-webhook] received", req.body);
+
+  if (
+    !datasetId ||
+    typeof datasetId !== "string" ||
+    datasetId.trim() === "" ||
+    datasetId.includes("{{")
+  ) {
+    return res.status(400).json({ ok: false, error: "invalid datasetId" });
   }
 
-  console.log("[apify-webhook] received", JSON.stringify({ datasetId }));
-
-  res.status(200).json({
-    ok: true,
-    datasetId,
-    message: "Webhook received",
-  });
+  res.status(200).json({ ok: true });
 
   setImmediate(async () => {
     const startedAt = Date.now();
     try {
-      const items = await fetchDatasetItems(datasetId);
+      const cleanDatasetId = datasetId.trim();
+      const items = await fetchDatasetItems(cleanDatasetId);
       console.log(
         "[apify-webhook] fetched",
-        JSON.stringify({ datasetId, items: items.length })
+        JSON.stringify({ datasetId: cleanDatasetId, items: items.length })
       );
 
       const summary = await saveRawInstagramPosts(items);
@@ -51,7 +42,7 @@ app.post("/webhooks/apify/instagram", (req, res) => {
       console.log(
         "[apify-webhook] processed",
         JSON.stringify({
-          datasetId,
+          datasetId: cleanDatasetId,
           ...summary,
           tookMs,
         })
@@ -64,7 +55,7 @@ app.post("/webhooks/apify/instagram", (req, res) => {
       console.error(
         "[apify-webhook] fatal processing error",
         JSON.stringify({
-          datasetId,
+          datasetId: typeof datasetId === "string" ? datasetId.trim() : null,
           error: error && error.message ? error.message : String(error || "unknown_error"),
         })
       );
