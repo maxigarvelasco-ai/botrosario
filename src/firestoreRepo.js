@@ -1,4 +1,4 @@
-const { admin, db } = require("./firebase");
+const { admin, getDb } = require("./firebase");
 
 const IG_POSTS_COLLECTION = "ig_posts_raw";
 
@@ -177,6 +177,7 @@ async function saveRawInstagramPost(item) {
     throw new Error("Cannot persist item without id or shortCode");
   }
 
+  const db = getDb();
   const normalized = normalizeInstagramItem(item);
   const ref = db.collection(IG_POSTS_COLLECTION).doc(docId);
 

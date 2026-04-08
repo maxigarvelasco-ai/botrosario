@@ -33,11 +33,13 @@ function initFirebase() {
   return admin.app();
 }
 
-initFirebase();
-const db = admin.firestore();
+function getDb() {
+  initFirebase();
+  return admin.firestore();
+}
 
 module.exports = {
   admin,
-  db,
   initFirebase,
+  getDb,
 };

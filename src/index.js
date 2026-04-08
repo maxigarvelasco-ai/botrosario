@@ -35,11 +35,7 @@ function extractItemsFromBody(body) {
 }
 
 app.get("/health", (_req, res) => {
-  return res.status(200).json({
-    ok: true,
-    service: "apify-instagram-webhook",
-    timestamp: new Date().toISOString(),
-  });
+  return res.status(200).send("ok");
 });
 
 app.post("/webhooks/apify/instagram", (req, res) => {
@@ -104,6 +100,6 @@ app.use((err, _req, res, _next) => {
 });
 
 const port = Number(process.env.PORT || 8080);
-app.listen(port, () => {
-  console.log(`[server] listening on port ${port}`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`[server] listening on 0.0.0.0:${port}`);
 });
