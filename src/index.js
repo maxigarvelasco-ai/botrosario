@@ -2,36 +2,17 @@ const express = require("express");
 require("dotenv").config();
 
 const { saveRawInstagramPosts } = require("./firestoreRepo");
+const { fetchDatasetItems } = require("./apify");
 
 const app = express();
 app.use(express.json({ limit: "2mb" }));
 
-function extractItemsFromBody(body) {
-  if (Array.isArray(body)) {
-    return body;
-  }
-
-  if (!body || typeof body !== "object") {
+function asDatasetId(value) {
+  if (value === undefined || value === null) {
     return null;
   }
-
-  if (Array.isArray(body.items)) {
-    return body.items;
-  }
-
-  if (Array.isArray(body.data)) {
-    return body.data;
-  }
-
-  if (body.data && typeof body.data === "object" && Array.isArray(body.data.items)) {
-    return body.data.items;
-  }
-
-  if (body.item && typeof body.item === "object") {
-    return [body.item];
-  }
-
-  return [body];
+  const out = String(value).trim();
+  return out.length ? out : null;
 }
 
 app.get("/health", (_req, res) => {
@@ -39,39 +20,38 @@ app.get("/health", (_req, res) => {
 });
 
 app.post("/webhooks/apify/instagram", (req, res) => {
-  const items = extractItemsFromBody(req.body);
-  if (!Array.isArray(items)) {
+  const datasetId = asDatasetId(req?.body?.datasetId);
+  if (!datasetId) {
     return res.status(400).json({
       ok: false,
       error: "invalid_payload",
-      message: "Expected payload as object or array",
+      message: "datasetId is required",
     });
   }
 
-  console.log("[apify-webhook] received", JSON.stringify({ received: items.length }));
-
-  if (items.length === 0) {
-    return res.status(200).json({
-      ok: true,
-      accepted: 0,
-      message: "No items to process",
-    });
-  }
+  console.log("[apify-webhook] received", JSON.stringify({ datasetId }));
 
   res.status(200).json({
     ok: true,
-    accepted: items.length,
+    datasetId,
     message: "Webhook received",
   });
 
   setImmediate(async () => {
     const startedAt = Date.now();
     try {
+      const items = await fetchDatasetItems(datasetId);
+      console.log(
+        "[apify-webhook] fetched",
+        JSON.stringify({ datasetId, items: items.length })
+      );
+
       const summary = await saveRawInstagramPosts(items);
       const tookMs = Date.now() - startedAt;
       console.log(
         "[apify-webhook] processed",
         JSON.stringify({
+          datasetId,
           ...summary,
           tookMs,
         })
@@ -81,7 +61,13 @@ app.post("/webhooks/apify/instagram", (req, res) => {
         console.error("[apify-webhook] sample errors", summary.errors.slice(0, 5));
       }
     } catch (error) {
-      console.error("[apify-webhook] fatal processing error", error);
+      console.error(
+        "[apify-webhook] fatal processing error",
+        JSON.stringify({
+          datasetId,
+          error: error && error.message ? error.message : String(error || "unknown_error"),
+        })
+      );
     }
   });
 });
