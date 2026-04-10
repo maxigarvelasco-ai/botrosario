@@ -103,12 +103,14 @@ function buildConfig(env = process.env) {
   }
 
   const firebase = resolveFirebaseCredentials(env);
+  const idempotencyCollection = asNonEmptyString(env.IDEMPOTENCY_COLLECTION) || "idempotency_keys";
 
   return {
     nodeEnv,
     port,
     apifyToken,
     firebase,
+    idempotencyCollection,
   };
 }
 

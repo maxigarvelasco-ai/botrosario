@@ -5,6 +5,7 @@ const { getConfig } = require("./config");
 const { saveRawInstagramPosts } = require("./firestoreRepo");
 const { fetchDatasetItems } = require("./apify");
 const { initFirebase, getDb } = require("./firebase");
+const { getIdempotencyRepository } = require("./idempotencyRepo");
 const { createLogger } = require("./logger");
 const { recordHttpRequest, snapshot } = require("./metrics");
 
@@ -26,6 +27,8 @@ try {
 
 const app = express();
 const logger = createLogger({ service: "node-api" });
+const idempotencyRepo = getIdempotencyRepository();
+const APIFY_WEBHOOK_SCOPE = "apify_webhook_instagram_dataset";
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -131,6 +134,10 @@ app.get("/readiness", async (req, res) => {
 app.post("/webhooks/apify/instagram", async (req, res) => {
   const datasetId = req.body?.datasetId;
   const requestId = req.requestId;
+  const payloadRunId =
+    (typeof req.body?.runId === "string" && req.body.runId.trim()) ||
+    (typeof req.body?.resource?.id === "string" && req.body.resource.id.trim()) ||
+    null;
 
   logger.info("apify_webhook_received", {
     requestId,
@@ -155,7 +162,31 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
   setImmediate(async () => {
     const startedAt = Date.now();
     const cleanDatasetId = datasetId.trim();
+    const idempotencyKey = payloadRunId ? `${cleanDatasetId}|${payloadRunId}` : cleanDatasetId;
+
     try {
+      const claim = await idempotencyRepo.claimKey({
+        scope: APIFY_WEBHOOK_SCOPE,
+        key: idempotencyKey,
+        allowRetryOnFailed: false,
+        meta: {
+          datasetId: cleanDatasetId,
+          runId: payloadRunId,
+          requestId,
+        },
+      });
+
+      if (!claim.claimed) {
+        logger.info("apify_webhook_replay_skipped", {
+          requestId,
+          datasetId: cleanDatasetId,
+          runId: payloadRunId,
+          idempotencyKey,
+          idempotencyStatus: claim.status,
+        });
+        return;
+      }
+
       const items = await fetchDatasetItems(cleanDatasetId);
       logger.info("apify_dataset_fetched", {
         requestId,
@@ -168,8 +199,24 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
       logger.info("apify_webhook_processed", {
         requestId,
         datasetId: cleanDatasetId,
+        runId: payloadRunId,
+        idempotencyKey,
         tookMs,
         summary,
+      });
+
+      await idempotencyRepo.markCompleted({
+        scope: APIFY_WEBHOOK_SCOPE,
+        key: idempotencyKey,
+        resultMeta: {
+          datasetId: cleanDatasetId,
+          runId: payloadRunId,
+          tookMs,
+          processed: summary.processed,
+          inserted: summary.inserted,
+          updated: summary.updated,
+          failed: summary.failed,
+        },
       });
 
       if (summary.failed > 0 && summary.errors.length > 0) {
@@ -183,8 +230,26 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
       logger.error("apify_webhook_processing_error", {
         requestId,
         datasetId: cleanDatasetId,
+        runId: payloadRunId,
+        idempotencyKey,
         error,
       });
+
+      try {
+        await idempotencyRepo.markFailed({
+          scope: APIFY_WEBHOOK_SCOPE,
+          key: idempotencyKey,
+          error: error && error.message ? error.message : String(error || "unknown_error"),
+        });
+      } catch (markError) {
+        logger.error("apify_webhook_idempotency_mark_failed_error", {
+          requestId,
+          datasetId: cleanDatasetId,
+          runId: payloadRunId,
+          idempotencyKey,
+          error: markError,
+        });
+      }
     }
   });
 });
