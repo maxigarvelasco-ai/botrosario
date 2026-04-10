@@ -140,6 +140,20 @@ const contractDefinitions = {
       "userLocation",
     ],
   },
+  InteractionLog: {
+    requiredFields: [
+      "id",
+      "chatId",
+      "createdAt",
+      "query",
+      "constraints",
+      "recommendationStatus",
+      "usedFallback",
+      "shortlistSummary",
+      "metadata",
+    ],
+    optionalFields: [],
+  },
   RawEvent: {
     requiredFields: ["sourcePostId", "evidence", "tags"],
     optionalFields: [
@@ -310,6 +324,43 @@ function validateConversationState(data) {
     if (!nested.ok) {
       nested.errors.forEach((err) => pushError(errors, `${path}.lastConstraints`, err));
     }
+  }
+
+  return buildResult(errors, data);
+}
+
+function validateInteractionLog(data) {
+  const errors = [];
+  const path = "InteractionLog";
+
+  if (!isPlainObject(data)) {
+    pushError(errors, path, "must be an object");
+    return buildResult(errors, data);
+  }
+
+  validateRequiredString(errors, data.id, `${path}.id`);
+  validateRequiredNumber(errors, data.chatId, `${path}.chatId`);
+
+  if (!isIsoDateTime(data.createdAt)) {
+    pushError(errors, `${path}.createdAt`, "must be an ISO date-time string");
+  }
+
+  validateRequiredString(errors, data.query, `${path}.query`);
+
+  if (!isPlainObject(data.constraints)) {
+    pushError(errors, `${path}.constraints`, "must be an object");
+  }
+
+  validateRequiredString(errors, data.recommendationStatus, `${path}.recommendationStatus`);
+
+  if (typeof data.usedFallback !== "boolean") {
+    pushError(errors, `${path}.usedFallback`, "must be a boolean");
+  }
+
+  validateRequiredStringArray(errors, data.shortlistSummary, `${path}.shortlistSummary`);
+
+  if (!isPlainObject(data.metadata)) {
+    pushError(errors, `${path}.metadata`, "must be an object");
   }
 
   return buildResult(errors, data);
@@ -499,6 +550,10 @@ function assertConversationState(data) {
   return assertValid(validateConversationState(data), "ConversationState");
 }
 
+function assertInteractionLog(data) {
+  return assertValid(validateInteractionLog(data), "InteractionLog");
+}
+
 function assertRawEvent(data) {
   return assertValid(validateRawEvent(data), "RawEvent");
 }
@@ -532,6 +587,7 @@ module.exports = {
   validateTelegramUpdateNormalized,
   validateIntentConstraints,
   validateConversationState,
+  validateInteractionLog,
   validateRawEvent,
   validateNormalizedEvent,
   validateRecommendationResult,
@@ -539,6 +595,7 @@ module.exports = {
   assertTelegramUpdateNormalized,
   assertIntentConstraints,
   assertConversationState,
+  assertInteractionLog,
   assertRawEvent,
   assertNormalizedEvent,
   assertRecommendationResult,

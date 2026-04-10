@@ -107,6 +107,7 @@ function buildConfig(env = process.env) {
   const eventCatalogCollection = asNonEmptyString(env.EVENT_CATALOG_COLLECTION) || "event_catalog";
   const conversationStateCollection =
     asNonEmptyString(env.CONVERSATION_STATE_COLLECTION) || "conversation_state";
+  const interactionLogCollection = asNonEmptyString(env.INTERACTION_LOG_COLLECTION) || "interaction_logs";
 
   return {
     nodeEnv,
@@ -116,6 +117,7 @@ function buildConfig(env = process.env) {
     idempotencyCollection,
     eventCatalogCollection,
     conversationStateCollection,
+    interactionLogCollection,
   };
 }
 

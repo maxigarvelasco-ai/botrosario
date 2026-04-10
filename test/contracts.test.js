@@ -5,6 +5,7 @@ const {
   validateTelegramUpdateNormalized,
   validateIntentConstraints,
   validateConversationState,
+  validateInteractionLog,
   validateRawEvent,
   validateNormalizedEvent,
   validateRecommendationResult,
@@ -82,6 +83,26 @@ test("IntentConstraints rechaza dateScope invalido", () => {
   assert.ok(result.errors.some((x) => x.includes("dateScope")));
 });
 
+test("InteractionLog valida caso valido", () => {
+  const result = validateInteractionLog({
+    id: "int_1",
+    chatId: 123,
+    createdAt: "2026-04-10T12:00:00.000Z",
+    query: "museos hoy",
+    constraints: {
+      dateScope: "today",
+    },
+    recommendationStatus: "ok",
+    usedFallback: false,
+    shortlistSummary: ["Museo Castagnino", "Macro"],
+    metadata: {
+      requestId: "req_1",
+    },
+  });
+
+  assert.equal(result.ok, true);
+  assert.equal(result.errors.length, 0);
+});
 test("ConversationState valida nested lastConstraints", () => {
   const input = {
     chatId: 1,
