@@ -6,6 +6,7 @@
   "main": "src/index.js",
   "scripts": {
     "start": "node src/index.js",
+    "test:config": "node --test test/config.test.js",
     "test:contracts": "node --test test/contracts.test.js",
     "process:ig-posts": "node src/processPendingInstagramPosts.js",
     "process:ig-posts:loop": "node src/processPendingInstagramPostsLoop.js"

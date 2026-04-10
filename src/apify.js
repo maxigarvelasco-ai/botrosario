@@ -1,11 +1,8 @@
 const APIFY_BASE_URL = "https://api.apify.com/v2";
+const { getConfig } = require("./config");
 
 function getApifyToken() {
-  const token = String(process.env.APIFY_TOKEN || "").trim();
-  if (!token) {
-    throw new Error("Missing APIFY_TOKEN environment variable");
-  }
-  return token;
+  return getConfig().apifyToken;
 }
 
 function asDatasetId(value) {

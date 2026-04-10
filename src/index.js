@@ -1,12 +1,28 @@
 const express = require("express");
 const crypto = require("crypto");
-require("dotenv").config();
 
+const { getConfig } = require("./config");
 const { saveRawInstagramPosts } = require("./firestoreRepo");
 const { fetchDatasetItems } = require("./apify");
 const { initFirebase, getDb } = require("./firebase");
 const { createLogger } = require("./logger");
 const { recordHttpRequest, snapshot } = require("./metrics");
+
+let config;
+try {
+  config = getConfig();
+} catch (error) {
+  const message = error && error.message ? error.message : String(error || "unknown_config_error");
+  console.error(
+    JSON.stringify({
+      ts: new Date().toISOString(),
+      level: "error",
+      msg: "config_validation_failed",
+      error: message,
+    })
+  );
+  process.exit(1);
+}
 
 const app = express();
 const logger = createLogger({ service: "node-api" });
@@ -51,7 +67,10 @@ async function checkReadiness() {
     config: {
       ok: true,
       details: {
-        hasApifyToken: Boolean(String(process.env.APIFY_TOKEN || "").trim()),
+        nodeEnv: config.nodeEnv,
+        port: config.port,
+        apifyTokenConfigured: true,
+        firebaseCredentialsSource: config.firebase.source,
       },
     },
     firestore: {
@@ -66,10 +85,6 @@ async function checkReadiness() {
       details: snapshot(),
     },
   };
-
-  if (!checks.config.details.hasApifyToken) {
-    checks.config.ok = false;
-  }
 
   try {
     const startedAt = Date.now();
@@ -199,11 +214,11 @@ app.use((err, req, res, _next) => {
   return res.status(500).json({ ok: false, error: "internal_error" });
 });
 
-const port = Number(process.env.PORT || 8080);
-app.listen(port, "0.0.0.0", () => {
+app.listen(config.port, "0.0.0.0", () => {
   logger.info("server_started", {
     host: "0.0.0.0",
-    port,
-    nodeEnv: process.env.NODE_ENV || "development",
+    port: config.port,
+    nodeEnv: config.nodeEnv,
+    firebaseCredentialsSource: config.firebase.source,
   });
 });
