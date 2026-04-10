@@ -7,6 +7,7 @@
   "scripts": {
     "start": "node src/index.js",
     "test:config": "node --test test/config.test.js",
+    "test:conversation-state": "node --test test/conversationStateRepo.test.js",
     "test:contracts": "node --test test/contracts.test.js",
     "test:event-catalog": "node --test test/eventCatalogRepo.test.js",
     "test:idempotency": "node --test test/idempotency.test.js",

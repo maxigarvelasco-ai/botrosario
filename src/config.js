@@ -105,6 +105,8 @@ function buildConfig(env = process.env) {
   const firebase = resolveFirebaseCredentials(env);
   const idempotencyCollection = asNonEmptyString(env.IDEMPOTENCY_COLLECTION) || "idempotency_keys";
   const eventCatalogCollection = asNonEmptyString(env.EVENT_CATALOG_COLLECTION) || "event_catalog";
+  const conversationStateCollection =
+    asNonEmptyString(env.CONVERSATION_STATE_COLLECTION) || "conversation_state";
 
   return {
     nodeEnv,
@@ -113,6 +115,7 @@ function buildConfig(env = process.env) {
     firebase,
     idempotencyCollection,
     eventCatalogCollection,
+    conversationStateCollection,
   };
 }
 

@@ -22,6 +22,7 @@ test("buildConfig returns normalized valid config", () => {
   assert.equal(config.nodeEnv, "development");
   assert.equal(config.port, 8080);
   assert.equal(config.apifyToken, "token_123");
+  assert.equal(config.conversationStateCollection, "conversation_state");
   assert.equal(config.firebase.source, "env_json");
   assert.match(config.firebase.serviceAccount.private_key, /BEGIN PRIVATE KEY/);
 });
