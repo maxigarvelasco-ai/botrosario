@@ -1,8 +1,9 @@
 const { admin, getDb } = require("./firebase");
 const crypto = require("crypto");
+const { assertNormalizedEvent } = require("./contracts");
+const { getEventCatalogRepository } = require("./eventCatalogRepo");
 
 const IG_POSTS_COLLECTION = "ig_posts_raw";
-const EVENTS_COLLECTION = String(process.env.FIRESTORE_EVENTS_COLLECTION || "events").trim() || "events";
 
 function asNullableString(value) {
   if (value === undefined || value === null) {
@@ -252,6 +253,173 @@ function normalizeEventForStorage(event) {
   };
 }
 
+function normalizeCategoryForContract(value) {
+  const token = normalizeToken(value);
+  if (!token) {
+    return "cultural";
+  }
+
+  switch (token) {
+    case "teatro":
+    case "museo":
+    case "cine":
+    case "feria":
+    case "taller":
+    case "charla":
+    case "familiar":
+    case "aire_libre":
+      return token;
+    case "al_aire_libre":
+      return "aire_libre";
+    default:
+      return "cultural";
+  }
+}
+
+function inferTimeBucket(hora) {
+  const clean = asNullableString(hora);
+  if (!clean) {
+    return "unknown";
+  }
+
+  const match = clean.match(/^(\d{1,2})(?::\d{2})?$/);
+  if (!match) {
+    return "other";
+  }
+
+  const hour = Number(match[1]);
+  if (!Number.isFinite(hour) || hour < 0 || hour > 23) {
+    return "other";
+  }
+  if (hour >= 12 && hour <= 18) {
+    return "afternoon";
+  }
+  if (hour >= 19) {
+    return "night";
+  }
+  return "other";
+}
+
+function asIsoDateOrNull(value) {
+  const clean = asNullableString(value);
+  if (!clean) {
+    return null;
+  }
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(clean)) {
+    return null;
+  }
+  return clean;
+}
+
+function compactText(value, maxLen = 140) {
+  const clean = asNullableString(value);
+  if (!clean) {
+    return null;
+  }
+  if (clean.length <= maxLen) {
+    return clean;
+  }
+  return `${clean.slice(0, maxLen)}...`;
+}
+
+function buildEventTitle(event) {
+  const payload = event && typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+  return (
+    compactText(payload.evidence_excerpt, 140) ||
+    compactText(payload.caption_excerpt, 140) ||
+    compactText(event.lugar, 140) ||
+    compactText(event.categoria, 140) ||
+    "Evento cultural"
+  );
+}
+
+function buildQuality(normalizedEvent) {
+  const checks = [
+    Boolean(asNullableString(normalizedEvent.title)),
+    Boolean(asNullableString(normalizedEvent.city)),
+    Boolean(asNullableString(normalizedEvent.category)),
+    Boolean(asNullableString(normalizedEvent.eventDate)),
+    Boolean(asNullableString(normalizedEvent.timeText)),
+    Boolean(asNullableString(normalizedEvent.venue)),
+    Array.isArray(normalizedEvent.tags) && normalizedEvent.tags.length > 0,
+  ];
+
+  const score = checks.reduce((acc, value) => acc + (value ? 1 : 0), 0);
+  const completeness = Number((score / checks.length).toFixed(2));
+  let confidence = 0.6;
+  if (normalizedEvent.eventDate) {
+    confidence = 0.7;
+  }
+  if (normalizedEvent.eventDate && normalizedEvent.timeText) {
+    confidence = 0.8;
+  }
+
+  return {
+    completeness,
+    confidence,
+  };
+}
+
+function toNormalizedEvent(event) {
+  const normalized = normalizeEventForStorage(event || {});
+  const eventHash = buildEventHash(normalized);
+  const category = normalizeCategoryForContract(normalized.category_norm || normalized.categoria);
+  const payload =
+    normalized.payload && typeof normalized.payload === "object" && normalized.payload !== null
+      ? normalized.payload
+      : {};
+
+  const out = {
+    eventHash,
+    title: buildEventTitle(normalized),
+    category,
+    timeBucket: inferTimeBucket(normalized.hora),
+    city: asNullableString(normalized.ciudad) || "Rosario",
+    isFree: Boolean(normalized.is_free),
+    tags: toUniqueStringArray([...(normalized.tags || []), category]),
+    source: {
+      provider: "ig_worker",
+      postId: asNullableString(payload.source_post_id),
+      ownerUsername: asNullableString(payload.source_owner_username),
+      sourceUrl: asNullableString(payload.source_url),
+    },
+    quality: {
+      completeness: 0,
+      confidence: 0,
+    },
+    updatedAt: new Date().toISOString(),
+  };
+
+  const dateText = asNullableString(normalized.fecha_text);
+  if (dateText) {
+    out.dateText = dateText;
+  }
+
+  const eventDate = asIsoDateOrNull(normalized.event_date);
+  if (eventDate) {
+    out.eventDate = eventDate;
+  }
+
+  const timeText = asNullableString(normalized.hora);
+  if (timeText) {
+    out.timeText = timeText;
+  }
+
+  const venue = asNullableString(normalized.lugar);
+  if (venue) {
+    out.venue = venue;
+  }
+
+  const description = compactText(payload.evidence_excerpt || payload.caption_excerpt, 600);
+  if (description) {
+    out.description = description;
+  }
+
+  out.quality = buildQuality(out);
+
+  return assertNormalizedEvent(out);
+}
+
 async function saveRawInstagramPost(item) {
   const docId = getPostDocId(item);
   if (!docId) {
@@ -468,7 +636,7 @@ async function upsertEvents(events) {
     throw new Error("upsertEvents expects an array");
   }
 
-  const db = getDb();
+  const catalogRepo = getEventCatalogRepository();
   const summary = {
     received: events.length,
     upserted: 0,
@@ -481,33 +649,23 @@ async function upsertEvents(events) {
 
   for (let index = 0; index < events.length; index += 1) {
     try {
-      const normalized = normalizeEventForStorage(events[index] || {});
-      const eventHash = buildEventHash(normalized);
-      const ref = db.collection(EVENTS_COLLECTION).doc(eventHash);
+      const normalizedEvent = toNormalizedEvent(events[index] || {});
+      const itemSummary = await catalogRepo.upsertEvents([normalizedEvent]);
 
-      const isCreated = await db.runTransaction(async (tx) => {
-        const snap = await tx.get(ref);
+      summary.upserted += itemSummary.upserted;
+      summary.created += itemSummary.created;
+      summary.updated += itemSummary.updated;
+      summary.failed += itemSummary.failed;
 
-        const payload = {
-          event_hash: eventHash,
-          ...normalized,
-          updated_at: admin.firestore.FieldValue.serverTimestamp(),
-        };
+      if (itemSummary.eventHashes && itemSummary.eventHashes.length > 0) {
+        summary.eventIds.push(...itemSummary.eventHashes);
+      }
 
-        if (!snap.exists) {
-          payload.created_at = admin.firestore.FieldValue.serverTimestamp();
+      if (itemSummary.errors && itemSummary.errors.length > 0) {
+        for (const errorLine of itemSummary.errors) {
+          const rewritten = String(errorLine).replace(/^index=\d+/, `index=${index}`);
+          summary.errors.push(rewritten);
         }
-
-        tx.set(ref, payload, { merge: true });
-        return !snap.exists;
-      });
-
-      summary.upserted += 1;
-      summary.eventIds.push(eventHash);
-      if (isCreated) {
-        summary.created += 1;
-      } else {
-        summary.updated += 1;
       }
     } catch (error) {
       summary.failed += 1;
