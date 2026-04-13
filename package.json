@@ -12,6 +12,7 @@
     "test:event-catalog": "node --test test/eventCatalogRepo.test.js",
     "test:idempotency": "node --test test/idempotency.test.js",
     "test:interaction-log": "node --test test/interactionLogRepo.test.js",
+    "test:recommendation-engine": "node --test test/recommendationEngine.test.js",
     "process:ig-posts": "node src/processPendingInstagramPosts.js",
     "process:ig-posts:loop": "node src/processPendingInstagramPostsLoop.js"
   },
