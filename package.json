@@ -1,0 +1,27 @@
+{
+  "name": "apify-firestore-webhook-backend",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Railway backend for Apify Instagram webhook -> Firestore",
+  "main": "src/index.js",
+  "scripts": {
+    "start": "node src/index.js",
+    "test:config": "node --test test/config.test.js",
+    "test:conversation-state": "node --test test/conversationStateRepo.test.js",
+    "test:contracts": "node --test test/contracts.test.js",
+    "test:event-catalog": "node --test test/eventCatalogRepo.test.js",
+    "test:idempotency": "node --test test/idempotency.test.js",
+    "test:interaction-log": "node --test test/interactionLogRepo.test.js",
+    "process:ig-posts": "node src/processPendingInstagramPosts.js",
+    "process:ig-posts:loop": "node src/processPendingInstagramPostsLoop.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.5",
+    "express": "^4.21.2",
+    "firebase-admin": "^13.0.1",
+    "tesseract.js": "^5.1.1"
+  }
+}
