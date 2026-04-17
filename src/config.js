@@ -22,6 +22,19 @@ function parsePort(rawPort) {
   return port;
 }
 
+function parseWebhookPathSecret(rawValue) {
+  const value = asNonEmptyString(rawValue);
+  if (!value) {
+    return null;
+  }
+
+  if (!/^[A-Za-z0-9_-]+$/.test(value)) {
+    throw new Error("Invalid TELEGRAM_WEBHOOK_PATH_SECRET: only letters, numbers, _ and - are allowed");
+  }
+
+  return value;
+}
+
 function normalizeServiceAccount(serviceAccount) {
   if (!serviceAccount || typeof serviceAccount !== "object") {
     throw new Error("Invalid Firebase credentials: expected JSON object");
@@ -109,6 +122,14 @@ function buildConfig(env = process.env) {
     asNonEmptyString(env.CONVERSATION_STATE_COLLECTION) || "conversation_state";
   const interactionLogCollection = asNonEmptyString(env.INTERACTION_LOG_COLLECTION) || "interaction_logs";
 
+  const telegramToken = asNonEmptyString(env.TELEGRAM_TOKEN);
+  const telegramWebhookSecret = asNonEmptyString(env.TELEGRAM_WEBHOOK_SECRET);
+  const telegramWebhookPathSecret = parseWebhookPathSecret(env.TELEGRAM_WEBHOOK_PATH_SECRET);
+  const telegramWebhookPath = telegramWebhookPathSecret
+    ? `/webhooks/telegram/${telegramWebhookPathSecret}`
+    : "/webhooks/telegram";
+  const telegramEnabled = Boolean(telegramToken);
+
   return {
     nodeEnv,
     port,
@@ -118,6 +139,13 @@ function buildConfig(env = process.env) {
     eventCatalogCollection,
     conversationStateCollection,
     interactionLogCollection,
+    telegram: {
+      enabled: telegramEnabled,
+      token: telegramToken,
+      webhookSecret: telegramWebhookSecret,
+      webhookPathSecret: telegramWebhookPathSecret,
+      webhookPath: telegramWebhookPath,
+    },
   };
 }
 

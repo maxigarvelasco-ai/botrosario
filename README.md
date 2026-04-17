@@ -75,3 +75,9 @@ Para OCR local del extractor, instalar Tesseract OCR en Windows (binario del sis
 - `eventextractor.py`: pensado para trigger de Cloud Storage (no HTTP puro).
 
 `flyerIngestor.py` no se debe borrar: genera sidecar `.meta.json` que usa `eventextractor.py` para enriquecer y normalizar eventos.
+
+## 8) Webhook Telegram en Node (nuevo)
+- El server Node ahora expone webhook Telegram en `/webhooks/telegram`.
+- Si definis `TELEGRAM_WEBHOOK_PATH_SECRET`, la ruta pasa a ser `/webhooks/telegram/<secret>`.
+- Si definis `TELEGRAM_WEBHOOK_SECRET`, se valida el header `x-telegram-bot-api-secret-token`.
+- El flujo reutiliza el use case de negocio (`telegramUseCase`) y envia chunks via Bot API.

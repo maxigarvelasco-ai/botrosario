@@ -26,6 +26,8 @@ test("buildConfig returns normalized valid config", () => {
   assert.equal(config.interactionLogCollection, "interaction_logs");
   assert.equal(config.firebase.source, "env_json");
   assert.match(config.firebase.serviceAccount.private_key, /BEGIN PRIVATE KEY/);
+  assert.equal(config.telegram.enabled, false);
+  assert.equal(config.telegram.webhookPath, "/webhooks/telegram");
 });
 
 test("buildConfig fails on invalid NODE_ENV", () => {
@@ -51,5 +53,28 @@ test("buildConfig fails on invalid FIREBASE_SERVICE_ACCOUNT_JSON", () => {
   assert.throws(
     () => buildConfig(validEnv({ FIREBASE_SERVICE_ACCOUNT_JSON: "{invalid_json}" })),
     /Invalid FIREBASE_SERVICE_ACCOUNT_JSON/
+  );
+});
+
+test("buildConfig enables telegram when TELEGRAM_TOKEN exists", () => {
+  const config = buildConfig(
+    validEnv({
+      TELEGRAM_TOKEN: "tg_token_123",
+      TELEGRAM_WEBHOOK_SECRET: "webhook-secret",
+      TELEGRAM_WEBHOOK_PATH_SECRET: "abc123_secret",
+    })
+  );
+
+  assert.equal(config.telegram.enabled, true);
+  assert.equal(config.telegram.token, "tg_token_123");
+  assert.equal(config.telegram.webhookSecret, "webhook-secret");
+  assert.equal(config.telegram.webhookPathSecret, "abc123_secret");
+  assert.equal(config.telegram.webhookPath, "/webhooks/telegram/abc123_secret");
+});
+
+test("buildConfig fails on invalid TELEGRAM_WEBHOOK_PATH_SECRET", () => {
+  assert.throws(
+    () => buildConfig(validEnv({ TELEGRAM_WEBHOOK_PATH_SECRET: "secret/with/slash" })),
+    /Invalid TELEGRAM_WEBHOOK_PATH_SECRET/
   );
 });

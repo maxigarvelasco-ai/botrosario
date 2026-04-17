@@ -8,6 +8,9 @@ const { initFirebase, getDb } = require("./firebase");
 const { getIdempotencyRepository } = require("./idempotencyRepo");
 const { createLogger } = require("./logger");
 const { recordHttpRequest, snapshot } = require("./metrics");
+const { getTelegramUseCase } = require("./telegramUseCase");
+const { createTelegramClient } = require("./telegramClient");
+const { createTelegramWebhookFlow } = require("./telegramWebhookFlow");
 
 let config;
 try {
@@ -29,6 +32,17 @@ const app = express();
 const logger = createLogger({ service: "node-api" });
 const idempotencyRepo = getIdempotencyRepository();
 const APIFY_WEBHOOK_SCOPE = "apify_webhook_instagram_dataset";
+const TELEGRAM_SECRET_HEADER = "x-telegram-bot-api-secret-token";
+const telegramWebhookPath = config.telegram.webhookPath;
+const telegramWebhookFlow = config.telegram.enabled
+  ? createTelegramWebhookFlow({
+      telegramUseCase: getTelegramUseCase(),
+      telegramClient: createTelegramClient({
+        token: config.telegram.token,
+      }),
+      logger,
+    })
+  : null;
 
 app.use(express.json({ limit: "2mb" }));
 
@@ -73,6 +87,9 @@ async function checkReadiness() {
         nodeEnv: config.nodeEnv,
         port: config.port,
         apifyTokenConfigured: true,
+        telegramEnabled: config.telegram.enabled,
+        telegramWebhookPath: config.telegram.webhookPath,
+        telegramWebhookSecretConfigured: Boolean(config.telegram.webhookSecret),
         firebaseCredentialsSource: config.firebase.source,
       },
     },
@@ -254,6 +271,51 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
   });
 });
 
+app.post(telegramWebhookPath, async (req, res) => {
+  const requestId = req.requestId;
+
+  if (!config.telegram.enabled || !telegramWebhookFlow) {
+    logger.warn("telegram_webhook_disabled", {
+      requestId,
+      path: req.originalUrl,
+    });
+    return res.status(503).json({ ok: false, error: "telegram_not_configured" });
+  }
+
+  if (config.telegram.webhookSecret) {
+    const requestSecret = req.get(TELEGRAM_SECRET_HEADER);
+    if (requestSecret !== config.telegram.webhookSecret) {
+      logger.warn("telegram_webhook_unauthorized", {
+        requestId,
+        path: req.originalUrl,
+      });
+      return res.status(401).json({ ok: false, error: "unauthorized" });
+    }
+  }
+
+  logger.info("telegram_webhook_received", {
+    requestId,
+    path: req.originalUrl,
+    updateId: req.body && typeof req.body.update_id === "number" ? req.body.update_id : null,
+  });
+
+  res.status(200).json({ ok: true });
+
+  setImmediate(async () => {
+    try {
+      await telegramWebhookFlow.process(req.body, {
+        requestId,
+      });
+    } catch (error) {
+      logger.error("telegram_webhook_processing_error", {
+        requestId,
+        path: req.originalUrl,
+        error,
+      });
+    }
+  });
+});
+
 app.use((err, req, res, _next) => {
   const requestId = req.requestId || null;
 
@@ -285,5 +347,8 @@ app.listen(config.port, "0.0.0.0", () => {
     port: config.port,
     nodeEnv: config.nodeEnv,
     firebaseCredentialsSource: config.firebase.source,
+    telegramEnabled: config.telegram.enabled,
+    telegramWebhookPath: config.telegram.webhookPath,
+    telegramWebhookSecretConfigured: Boolean(config.telegram.webhookSecret),
   });
 });
