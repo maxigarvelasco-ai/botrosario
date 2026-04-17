@@ -154,7 +154,7 @@ function createTelegramUseCase({
     let response;
 
     try {
-      constraints = intentParser.parseIntentConstraints(effectiveQuery, previousState);
+      constraints = await intentParser.parseIntentConstraints(effectiveQuery, previousState);
       recommendation = await recommendationEngine.recommend(constraints, {
         userLocation: resolvedLocation || undefined,
         hasUserLocation: hasLocation(resolvedLocation),

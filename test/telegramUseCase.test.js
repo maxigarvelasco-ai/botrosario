@@ -44,6 +44,7 @@ function keyForQuery(query) {
 function createUseCaseHarness({
   eventsByQuery = {},
   initialState = null,
+  intentParser = { parseIntentConstraints },
   nowIso = "2026-04-13T10:00:00.000Z",
 } = {}) {
   const stateStore = new Map();
@@ -92,7 +93,7 @@ function createUseCaseHarness({
   const responseRenderer = createResponseRenderer();
 
   const useCase = createTelegramUseCase({
-    intentParser: { parseIntentConstraints },
+    intentParser,
     recommendationEngine,
     responseRenderer,
     conversationStateRepository,
@@ -262,4 +263,30 @@ test("texto vacio sin contexto devuelve BotResponse valido y lo registra", async
 
   assert.equal(harness.interactionLogs.length, 1);
   assert.equal(harness.interactionLogs[0].query, "consulta vacia");
+});
+
+test("espera correctamente intentParser async (hibrido)", async () => {
+  const strictKey = keyForQuery({ city: "Rosario", eventDate: "2026-04-13", isFree: null });
+  let asyncParserCalled = false;
+
+  const harness = createUseCaseHarness({
+    eventsByQuery: {
+      [strictKey]: [validEvent({ eventHash: "evt_async" })],
+    },
+    intentParser: {
+      async parseIntentConstraints(rawText, conversationState) {
+        asyncParserCalled = true;
+        await new Promise((resolve) => setImmediate(resolve));
+        return parseIntentConstraints(rawText, conversationState);
+      },
+    },
+  });
+
+  const response = await harness.useCase.execute(validUpdate({ text: "quiero museos hoy" }));
+
+  assert.equal(asyncParserCalled, true);
+  assert.equal(response.metadata.recommendationStatus, "ok");
+
+  const state = harness.getState(123);
+  assert.equal(state.lastConstraints.source, "deterministic");
 });
