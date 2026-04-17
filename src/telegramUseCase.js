@@ -2,7 +2,7 @@ const {
   assertBotResponse,
   assertTelegramUpdateNormalized,
 } = require("./contracts");
-const { parseIntentConstraints } = require("./intentParser");
+const { getHybridIntentParser } = require("./hybridIntentParser");
 const { getRecommendationEngine } = require("./recommendationEngine");
 const { getResponseRenderer } = require("./responseRenderer");
 const { getConversationStateRepository } = require("./conversationStateRepo");
@@ -88,7 +88,7 @@ function mergeResponseMetadata(response, extraMetadata) {
 }
 
 function createTelegramUseCase({
-  intentParser = { parseIntentConstraints },
+  intentParser = getHybridIntentParser(),
   recommendationEngine = getRecommendationEngine(),
   responseRenderer = getResponseRenderer(),
   conversationStateRepository = getConversationStateRepository(),

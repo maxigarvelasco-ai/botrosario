@@ -3,6 +3,7 @@ const path = require("path");
 require("dotenv").config();
 
 const ALLOWED_NODE_ENVS = new Set(["development", "test", "production"]);
+const ALLOWED_LLM_PROVIDERS = new Set(["groq"]);
 
 let cachedConfig = null;
 
@@ -22,6 +23,37 @@ function parsePort(rawPort) {
   return port;
 }
 
+function parseBoolean(rawValue, fallback = false) {
+  const value = asNonEmptyString(rawValue);
+  if (!value) {
+    return fallback;
+  }
+
+  const normalized = value.toLowerCase();
+  if (["1", "true", "yes", "on"].includes(normalized)) {
+    return true;
+  }
+  if (["0", "false", "no", "off"].includes(normalized)) {
+    return false;
+  }
+
+  throw new Error(`Invalid boolean value: ${value}`);
+}
+
+function parsePositiveInt(rawValue, fieldName, fallback) {
+  const value = asNonEmptyString(rawValue);
+  if (!value) {
+    return fallback;
+  }
+
+  const num = Number(value);
+  if (!Number.isInteger(num) || num <= 0) {
+    throw new Error(`Invalid ${fieldName}: must be a positive integer`);
+  }
+
+  return num;
+}
+
 function parseWebhookPathSecret(rawValue) {
   const value = asNonEmptyString(rawValue);
   if (!value) {
@@ -33,6 +65,35 @@ function parseWebhookPathSecret(rawValue) {
   }
 
   return value;
+}
+
+function resolveIntentLlmConfig(env) {
+  const enabled = parseBoolean(env.LLM_INTENT_ENABLED, false);
+
+  const provider = asNonEmptyString(env.LLM_INTENT_PROVIDER) || "groq";
+  if (!ALLOWED_LLM_PROVIDERS.has(provider)) {
+    throw new Error(`Invalid LLM_INTENT_PROVIDER: ${provider}. Allowed: groq`);
+  }
+
+  const model = asNonEmptyString(env.LLM_INTENT_MODEL);
+  const apiKey = asNonEmptyString(env.LLM_INTENT_API_KEY);
+  const timeoutMs = parsePositiveInt(env.LLM_INTENT_TIMEOUT_MS, "LLM_INTENT_TIMEOUT_MS", 10000);
+
+  if (enabled && !apiKey) {
+    throw new Error("Missing LLM_INTENT_API_KEY when LLM_INTENT_ENABLED=true");
+  }
+
+  if (enabled && !model) {
+    throw new Error("Missing LLM_INTENT_MODEL when LLM_INTENT_ENABLED=true");
+  }
+
+  return {
+    enabled,
+    provider,
+    model,
+    apiKey,
+    timeoutMs,
+  };
 }
 
 function normalizeServiceAccount(serviceAccount) {
@@ -121,6 +182,7 @@ function buildConfig(env = process.env) {
   const conversationStateCollection =
     asNonEmptyString(env.CONVERSATION_STATE_COLLECTION) || "conversation_state";
   const interactionLogCollection = asNonEmptyString(env.INTERACTION_LOG_COLLECTION) || "interaction_logs";
+  const intentLlm = resolveIntentLlmConfig(env);
 
   const telegramToken = asNonEmptyString(env.TELEGRAM_TOKEN);
   const telegramWebhookSecret = asNonEmptyString(env.TELEGRAM_WEBHOOK_SECRET);
@@ -139,6 +201,7 @@ function buildConfig(env = process.env) {
     eventCatalogCollection,
     conversationStateCollection,
     interactionLogCollection,
+    intentLlm,
     telegram: {
       enabled: telegramEnabled,
       token: telegramToken,

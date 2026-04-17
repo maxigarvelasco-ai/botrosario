@@ -26,6 +26,9 @@ test("buildConfig returns normalized valid config", () => {
   assert.equal(config.interactionLogCollection, "interaction_logs");
   assert.equal(config.firebase.source, "env_json");
   assert.match(config.firebase.serviceAccount.private_key, /BEGIN PRIVATE KEY/);
+  assert.equal(config.intentLlm.enabled, false);
+  assert.equal(config.intentLlm.provider, "groq");
+  assert.equal(config.intentLlm.timeoutMs, 10000);
   assert.equal(config.telegram.enabled, false);
   assert.equal(config.telegram.webhookPath, "/webhooks/telegram");
 });
@@ -76,5 +79,38 @@ test("buildConfig fails on invalid TELEGRAM_WEBHOOK_PATH_SECRET", () => {
   assert.throws(
     () => buildConfig(validEnv({ TELEGRAM_WEBHOOK_PATH_SECRET: "secret/with/slash" })),
     /Invalid TELEGRAM_WEBHOOK_PATH_SECRET/
+  );
+});
+
+test("buildConfig enables LLM intent parser when configured", () => {
+  const config = buildConfig(
+    validEnv({
+      LLM_INTENT_ENABLED: "true",
+      LLM_INTENT_PROVIDER: "groq",
+      LLM_INTENT_MODEL: "llama-3.3-70b-versatile",
+      LLM_INTENT_API_KEY: "groq-key",
+      LLM_INTENT_TIMEOUT_MS: "8000",
+    })
+  );
+
+  assert.equal(config.intentLlm.enabled, true);
+  assert.equal(config.intentLlm.provider, "groq");
+  assert.equal(config.intentLlm.model, "llama-3.3-70b-versatile");
+  assert.equal(config.intentLlm.apiKey, "groq-key");
+  assert.equal(config.intentLlm.timeoutMs, 8000);
+});
+
+test("buildConfig fails when LLM intent is enabled without API key", () => {
+  assert.throws(
+    () =>
+      buildConfig(
+        validEnv({
+          LLM_INTENT_ENABLED: "true",
+          LLM_INTENT_PROVIDER: "groq",
+          LLM_INTENT_MODEL: "llama-3.3-70b-versatile",
+          LLM_INTENT_API_KEY: "",
+        })
+      ),
+    /Missing LLM_INTENT_API_KEY/
   );
 });

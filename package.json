@@ -12,6 +12,8 @@
     "test:event-catalog": "node --test test/eventCatalogRepo.test.js",
     "test:idempotency": "node --test test/idempotency.test.js",
     "test:interaction-log": "node --test test/interactionLogRepo.test.js",
+    "test:intent-parser-hybrid": "node --test test/hybridIntentParser.test.js",
+    "test:intent-parser-llm": "node --test test/llmIntentParser.test.js",
     "test:recommendation-engine": "node --test test/recommendationEngine.test.js",
     "test:response-renderer": "node --test test/responseRenderer.test.js",
     "test:telegram-client": "node --test test/telegramClient.test.js",
