@@ -14,6 +14,7 @@
     "test:interaction-log": "node --test test/interactionLogRepo.test.js",
     "test:recommendation-engine": "node --test test/recommendationEngine.test.js",
     "test:response-renderer": "node --test test/responseRenderer.test.js",
+    "test:telegram-use-case": "node --test test/telegramUseCase.test.js",
     "process:ig-posts": "node src/processPendingInstagramPosts.js",
     "process:ig-posts:loop": "node src/processPendingInstagramPostsLoop.js"
   },
