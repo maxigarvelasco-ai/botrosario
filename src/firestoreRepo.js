@@ -147,6 +147,10 @@ function normalizeInstagramItem(item) {
   const location = safe.location && typeof safe.location === "object" ? safe.location : {};
   const owner = safe.owner && typeof safe.owner === "object" ? safe.owner : {};
 
+  const parsedEventIds = Array.isArray(safe.parsedEventIds)
+    ? safe.parsedEventIds.filter(Boolean).map(String)
+    : null;
+
   return {
     id: asNullableString(safe.id),
     shortCode: asNullableString(safe.shortCode || safe.shortcode),
@@ -168,9 +172,9 @@ function normalizeInstagramItem(item) {
     audioUrl: asNullableString(safe.audioUrl),
     inputUrl: asNullableString(safe.inputUrl),
     childDisplayUrls: extractChildDisplayUrls(safe.childPosts),
-    ocrStatus: asNullableString(safe.ocrStatus) || "pending",
+    ocrStatus: asNullableString(safe.ocrStatus),
     ocrText: asNullableString(safe.ocrText),
-    parsedEventIds: Array.isArray(safe.parsedEventIds) ? safe.parsedEventIds.filter(Boolean).map(String) : [],
+    parsedEventIds,
   };
 }
 
@@ -436,8 +440,29 @@ async function saveRawInstagramPost(item) {
     updatedAt: admin.firestore.FieldValue.serverTimestamp(),
   };
 
+  if (Array.isArray(normalized.parsedEventIds)) {
+    payload.parsedEventsCount = normalized.parsedEventIds.length;
+  } else {
+    delete payload.parsedEventIds;
+  }
+
+  if (!normalized.ocrStatus) {
+    delete payload.ocrStatus;
+  }
+
+  if (!normalized.ocrText) {
+    delete payload.ocrText;
+  }
+
   if (!snapshot.exists) {
     payload.createdAt = admin.firestore.FieldValue.serverTimestamp();
+    if (!payload.ocrStatus) {
+      payload.ocrStatus = "pending";
+    }
+    if (!Array.isArray(payload.parsedEventIds)) {
+      payload.parsedEventIds = [];
+      payload.parsedEventsCount = 0;
+    }
   }
 
   await ref.set(payload, { merge: true });

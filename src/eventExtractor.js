@@ -349,6 +349,31 @@ function eventSignalScore(chunk) {
   return score;
 }
 
+function buildOcrLineCandidates(ocrText) {
+  const lines = String(ocrText || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const out = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (eventSignalScore(line) <= 0) {
+      continue;
+    }
+
+    // Keep local context for each OCR hit to preserve venue/date hints from nearby lines.
+    const prev = lines[index - 1] || "";
+    const next = lines[index + 1] || "";
+    const block = [prev, line, next].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+    if (block.length > 0) {
+      out.push(block);
+    }
+  }
+
+  return uniqueStrings(out).slice(0, 40);
+}
+
 function splitCandidateBlocks(caption, ocrText) {
   const captionBlocks = String(caption || "")
     .split(/\n{2,}|[•·\-]{2,}/)
@@ -359,9 +384,11 @@ function splitCandidateBlocks(caption, ocrText) {
     .split(/\n{2,}/)
     .map((x) => x.trim())
     .filter(Boolean)
-    .slice(0, 12);
+    .slice(0, 40);
 
-  const blocks = uniqueStrings([...captionBlocks, ...ocrBlocks]);
+  const ocrLineBlocks = buildOcrLineCandidates(ocrText);
+
+  const blocks = uniqueStrings([...captionBlocks, ...ocrBlocks, ...ocrLineBlocks]);
   return blocks.filter((block) => eventSignalScore(block) > 0);
 }
 
