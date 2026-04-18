@@ -7,7 +7,13 @@ function sleep(ms) {
 
 async function runLoop() {
   const intervalMs = Math.max(5000, Number(process.env.IG_POSTS_POLL_MS || 30000) || 30000);
-  console.log("[ig-worker-loop] started", JSON.stringify({ intervalMs }));
+  const startupDelayMs = Math.max(0, Number(process.env.IG_WORKER_STARTUP_DELAY_MS || 15000) || 15000);
+  console.log("[ig-worker-loop] started", JSON.stringify({ intervalMs, startupDelayMs }));
+
+  if (startupDelayMs > 0) {
+    await sleep(startupDelayMs);
+  }
+
   let runPendingInstagramPostsOnce = null;
 
   while (true) {
