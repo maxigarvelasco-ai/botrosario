@@ -32,12 +32,8 @@ function shouldStartHealthServer() {
     return false;
   }
 
-  // Prefer explicit opt-in, but auto-enable on Railway where HTTP healthchecks are common.
-  if (isTruthy(process.env.IG_WORKER_HEALTHCHECK_ENABLED)) {
-    return true;
-  }
-
-  return Boolean(process.env.RAILWAY_SERVICE_ID || process.env.RAILWAY_ENVIRONMENT_ID);
+  // Keep health endpoint on by default for managed platforms with HTTP healthchecks.
+  return true;
 }
 
 function startHealthServerIfNeeded() {
@@ -45,7 +41,7 @@ function startHealthServerIfNeeded() {
     return null;
   }
 
-  const port = Number(process.env.PORT);
+  const port = Number(process.env.PORT || 8080);
   if (!Number.isInteger(port) || port <= 0) {
     console.warn("[ig-worker-loop] health server skipped: invalid PORT", process.env.PORT || "");
     return null;
