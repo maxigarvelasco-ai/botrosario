@@ -1,8 +1,6 @@
 require("dotenv").config();
 const http = require("http");
 
-const { runPendingInstagramPostsOnce } = require("./processPendingInstagramPosts");
-
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
@@ -10,9 +8,15 @@ function sleep(ms) {
 async function runLoop() {
   const intervalMs = Math.max(5000, Number(process.env.IG_POSTS_POLL_MS || 30000) || 30000);
   console.log("[ig-worker-loop] started", JSON.stringify({ intervalMs }));
+  let runPendingInstagramPostsOnce = null;
 
   while (true) {
     try {
+      if (!runPendingInstagramPostsOnce) {
+        ({ runPendingInstagramPostsOnce } = require("./processPendingInstagramPosts"));
+        console.log("[ig-worker-loop] processor loaded");
+      }
+
       await runPendingInstagramPostsOnce();
     } catch (error) {
       console.error("[ig-worker-loop] cycle error", error && error.message ? error.message : error);
