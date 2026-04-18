@@ -185,7 +185,7 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
       const claim = await idempotencyRepo.claimKey({
         scope: APIFY_WEBHOOK_SCOPE,
         key: idempotencyKey,
-        allowRetryOnFailed: false,
+        allowRetryOnFailed: true,
         meta: {
           datasetId: cleanDatasetId,
           runId: payloadRunId,
@@ -229,10 +229,9 @@ app.post("/webhooks/apify/instagram", async (req, res) => {
           datasetId: cleanDatasetId,
           runId: payloadRunId,
           tookMs,
-          processed: summary.processed,
-          inserted: summary.inserted,
-          updated: summary.updated,
-          failed: summary.failed,
+          processed: Number(summary.processed || 0),
+          upserted: Number(summary.upserted || 0),
+          failed: Number(summary.failed || 0),
         },
       });
 
