@@ -169,3 +169,30 @@ test("respeta filtro isFree cuando se informa por contexto", async () => {
   assert.equal(result.shortlist[0].event.isFree, true);
   assert.equal(receivedQueries[0].isFree, true);
 });
+
+test("si el usuario pide todos los eventos no recorta a 5", async () => {
+  const strictKey = keyFor({ city: "Rosario", eventDate: "2026-04-13", isFree: null });
+  const events = Array.from({ length: 8 }, (_, index) =>
+    validEvent({
+      eventHash: `evt_all_${index}`,
+      title: `Evento ${index + 1}`,
+      eventDate: "2026-04-13",
+      timeText: `${String(10 + index).padStart(2, "0")}:00`,
+    })
+  );
+
+  const { engine } = buildEngine({
+    [strictKey]: events,
+  });
+
+  const result = await engine.recommend(
+    validIntent({
+      rawText: "dame todos los eventos de hoy",
+      includeCategories: [],
+    })
+  );
+
+  assert.equal(result.status, "ok");
+  assert.equal(result.candidatesCount, 8);
+  assert.equal(result.shortlist.length, 8);
+});

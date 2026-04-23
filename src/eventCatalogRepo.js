@@ -28,7 +28,7 @@ function asPositiveLimit(value, fallback = 20) {
   if (!Number.isInteger(num) || num <= 0) {
     throw new Error("limit must be a positive integer");
   }
-  return Math.min(num, 100);
+  return Math.min(num, 500);
 }
 
 function assertIsoDate(value, fieldName) {

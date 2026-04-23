@@ -18,6 +18,37 @@ function asOptionalBoolean(value, fieldName) {
   return value;
 }
 
+function normalizeText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function wantsAllResults(rawText) {
+  const normalized = normalizeText(rawText);
+  if (!normalized) {
+    return false;
+  }
+
+  if (/\b(todos?|todas?)\s+(los\s+|las\s+)?(eventos|planes|opciones|actividades)\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\b(lista(do)?\s+complet[ao])\b/.test(normalized)) {
+    return true;
+  }
+
+  if (/\b(sin\s+limite|sin\s+tope)\b/.test(normalized)) {
+    return true;
+  }
+
+  return false;
+}
+
 function toIsoDate(value) {
   const year = value.getFullYear();
   const month = String(value.getMonth() + 1).padStart(2, "0");
@@ -146,6 +177,7 @@ function createRecommendationEngine({
   defaultCity = "Rosario",
   shortlistLimit = 5,
   fetchLimit = 100,
+  showAllFetchLimit = 500,
 } = {}) {
   const catalogRepo = eventCatalogRepository;
   if (!catalogRepo || typeof catalogRepo.findEvents !== "function") {
@@ -155,11 +187,17 @@ function createRecommendationEngine({
   const cleanDefaultCity = asNonEmptyString(defaultCity) || "Rosario";
   const cleanShortlistLimit = Number.isInteger(shortlistLimit) && shortlistLimit > 0 ? shortlistLimit : 5;
   const cleanFetchLimit = Number.isInteger(fetchLimit) && fetchLimit > 0 ? Math.min(fetchLimit, 100) : 100;
+  const cleanShowAllFetchLimit =
+    Number.isInteger(showAllFetchLimit) && showAllFetchLimit > 0
+      ? Math.min(showAllFetchLimit, 500)
+      : 500;
 
   async function recommend(constraintsInput, context = {}) {
     const constraints = assertIntentConstraints(constraintsInput);
     const nowDate = now();
     const targetDate = mapDateScopeToEventDate(constraints.dateScope, nowDate);
+    const showAllResults = Boolean(context.showAll) || wantsAllResults(constraints.rawText);
+    const queryLimit = showAllResults ? cleanShowAllFetchLimit : cleanFetchLimit;
 
     const city = asNonEmptyString(context.city) || cleanDefaultCity;
     const isFree = asOptionalBoolean(context.isFree, "context.isFree");
@@ -191,7 +229,7 @@ function createRecommendationEngine({
       city,
       eventDate: targetDate,
       isFree,
-      limit: cleanFetchLimit,
+      limit: queryLimit,
     };
 
     const strictBaseEvents = await catalogRepo.findEvents(strictQuery);
@@ -205,7 +243,7 @@ function createRecommendationEngine({
       const relaxedQuery = {
         city,
         isFree,
-        limit: cleanFetchLimit,
+        limit: queryLimit,
       };
 
       const relaxedBaseEvents = await catalogRepo.findEvents(relaxedQuery);
@@ -241,7 +279,8 @@ function createRecommendationEngine({
       });
     }
 
-    const shortlist = normalizeShortlist(finalCandidates, constraints, cleanShortlistLimit, usedFallback);
+    const effectiveShortlistLimit = showAllResults ? finalCandidates.length : cleanShortlistLimit;
+    const shortlist = normalizeShortlist(finalCandidates, constraints, effectiveShortlistLimit, usedFallback);
 
     return assertRecommendationResult({
       status: "ok",
