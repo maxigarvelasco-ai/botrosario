@@ -326,12 +326,92 @@ function compactText(value, maxLen = 140) {
   return `${clean.slice(0, maxLen)}...`;
 }
 
+function normalizeDisplayText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[\u200B-\u200D\uFEFF]/g, "")
+    .trim();
+}
+
+function isReadableTitleCandidate(value) {
+  const text = normalizeDisplayText(value);
+  if (!text) {
+    return false;
+  }
+
+  const alnum = (text.match(/[A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  const letters = (text.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  if (alnum < 12) {
+    return false;
+  }
+
+  const letterRatio = letters / alnum;
+  if (letterRatio < 0.6) {
+    return false;
+  }
+
+  if (/[|\\]{2,}|["“”']{3,}|\b[a-z]{1,2}\d{4,}\b/i.test(text)) {
+    return false;
+  }
+
+  return true;
+}
+
+function extractShortHeadline(value) {
+  const text = normalizeDisplayText(value);
+  if (!text) {
+    return null;
+  }
+
+  const head = text.split("/")[0].trim();
+  if (!head) {
+    return null;
+  }
+  if (head.length < 6 || head.length > 80) {
+    return null;
+  }
+  if (!isReadableTitleCandidate(head)) {
+    return null;
+  }
+  if (/^(gratis|\d+\b|planaxia\b)/i.test(head)) {
+    return null;
+  }
+
+  return head;
+}
+
 function buildEventTitle(event) {
   const payload = event && typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+
+  const evidence = normalizeDisplayText(payload.evidence_excerpt);
+  const shortHeadline = extractShortHeadline(evidence);
+  if (shortHeadline) {
+    return compactText(shortHeadline, 140);
+  }
+
+  const categoria = asNullableString(event.categoria) || "cultural";
+  const venue = compactText(event.lugar, 80);
+  const time = asNullableString(event.hora);
+
+  if (venue && time) {
+    return `Plan ${categoria} en ${venue} (${time})`;
+  }
+  if (venue) {
+    return `Plan ${categoria} en ${venue}`;
+  }
+
+  if (isReadableTitleCandidate(evidence)) {
+    return compactText(evidence, 140);
+  }
+
+  const caption = normalizeDisplayText(payload.caption_excerpt);
+  if (isReadableTitleCandidate(caption)) {
+    return compactText(caption, 140);
+  }
+
   return (
-    compactText(payload.evidence_excerpt, 140) ||
-    compactText(payload.caption_excerpt, 140) ||
-    compactText(event.lugar, 140) ||
+    compactText(caption, 140) ||
+    compactText(venue, 140) ||
     compactText(event.categoria, 140) ||
     "Evento cultural"
   );

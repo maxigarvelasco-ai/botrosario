@@ -97,6 +97,8 @@ const HOUR_REGEXES = [
   /\b(?:a\s+las\s*)?(\d{1,2})\s*hs\b/i,
 ];
 
+const SLASH_HOUR_REGEX = /\/\s*(\d{1,2})(?:[:.](\d{2}))?\s*hs\b/i;
+
 const DATE_REGEXES = [
   /\b(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?\b/,
   /\b(\d{1,2})\s+de\s+([a-zA-ZáéíóúÁÉÍÓÚñÑ]+)(?:\s+de\s+(\d{4}))?\b/u,
@@ -120,18 +122,45 @@ function parseHour(text) {
     }
 
     if (m.length >= 3 && m[2] !== undefined) {
-      const h = String(m[1]).padStart(2, "0");
-      const mm = String(m[2]).padStart(2, "0");
+      const hour = Number(m[1]);
+      const minute = Number(m[2]);
+      if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+        continue;
+      }
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        continue;
+      }
+      const h = String(hour).padStart(2, "0");
+      const mm = String(minute).padStart(2, "0");
       return `${h}:${mm}`;
     }
 
     const h = Number(m[1]);
-    if (Number.isFinite(h)) {
+    if (Number.isFinite(h) && h >= 0 && h <= 23) {
       return `${String(h).padStart(2, "0")}:00`;
     }
   }
 
   return null;
+}
+
+function parseSlashHour(text) {
+  const haystack = String(text || "");
+  const m = haystack.match(SLASH_HOUR_REGEX);
+  if (!m) {
+    return null;
+  }
+
+  const hour = Number(m[1]);
+  const minute = Number(m[2] || "0");
+  if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+    return null;
+  }
+  if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+    return null;
+  }
+
+  return `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
 }
 
 function parseEventDate(text, fallbackTimestamp) {
@@ -219,9 +248,10 @@ function toIsoDate(year, month, day) {
   return date.toISOString().slice(0, 10);
 }
 
-function inferCity(post, text) {
+function inferCity(post, text, options = {}) {
+  const usePostLocation = options.usePostLocation !== false;
   const fromLocation = asNullableString(post.locationName);
-  if (fromLocation) {
+  if (usePostLocation && fromLocation) {
     const normalized = normalizeToken(fromLocation);
     for (const [keyword, value] of Object.entries(CITY_BY_KEYWORD)) {
       if (normalized && normalized.includes(normalizeToken(keyword))) {
@@ -241,8 +271,19 @@ function inferCity(post, text) {
 }
 
 function inferLugar(post, text) {
+  const explicitVenue = String(text || "").match(/\b([A-ZÁÉÍÓÚÑ0-9][A-ZÁÉÍÓÚÑ0-9 .&'\-]{2,100})\s*\/\s*\d{1,2}(?:[:.]\d{2})?\s*hs\b/iu);
+  if (explicitVenue && explicitVenue[1]) {
+    return asNullableString(explicitVenue[1]);
+  }
+
+  const explicitSalida = String(text || "").match(/\bSALIDA:\s*([^/\n]{4,120})\s*\/\s*\d{1,2}(?:[:.]\d{2})?\s*hs\b/iu);
+  if (explicitSalida && explicitSalida[1]) {
+    return asNullableString(explicitSalida[1]);
+  }
+
   const fromLocation = asNullableString(post.locationName);
-  if (fromLocation) {
+  const usePostLocation = !(post && post._ignorePostLocationForVenue);
+  if (usePostLocation && fromLocation) {
     return fromLocation;
   }
 
@@ -340,6 +381,9 @@ function eventSignalScore(chunk) {
   if (parseHour(chunk)) {
     score += 1;
   }
+  if (/\b[A-ZÁÉÍÓÚÑ0-9 .&'\-]{3,}\s*\/\s*\d{1,2}(?:[:.]\d{2})?\s*hs\b/iu.test(chunk)) {
+    score += 1;
+  }
   if (DATE_REGEXES.some((re) => re.test(chunk))) {
     score += 2;
   }
@@ -358,27 +402,33 @@ function buildOcrLineCandidates(ocrText) {
   const out = [];
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
-    if (eventSignalScore(line) <= 0) {
+    if (line.length < 12) {
       continue;
     }
 
-    // Keep local context for each OCR hit to preserve venue/date hints from nearby lines.
-    const prev = lines[index - 1] || "";
-    const next = lines[index + 1] || "";
-    const block = [prev, line, next].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-    if (block.length > 0) {
-      out.push(block);
+    const hasHour = /\b\d{1,2}(?:[:.]\d{2})?\s*hs\b/i.test(line);
+    const hasVenuePattern = /\b[A-ZÁÉÍÓÚÑ0-9 .&'\-]{3,}\s*\/\s*\d{1,2}(?:[:.]\d{2})?\s*hs\b/iu.test(line);
+    const hasCulturalHint = /\b(museo|teatro|centro cultural|feria|muestra|concierto|orquesta|planetario|biblioteca|recorrida|desfile|opera)\b/i.test(line);
+    if (!hasHour && !hasVenuePattern && !hasCulturalHint) {
+      continue;
+    }
+
+    if (eventSignalScore(line) > 0) {
+      out.push(line);
     }
   }
 
   return uniqueStrings(out).slice(0, 40);
 }
 
-function splitCandidateBlocks(caption, ocrText) {
-  const captionBlocks = String(caption || "")
-    .split(/\n{2,}|[•·\-]{2,}/)
-    .map((x) => x.trim())
-    .filter(Boolean);
+function splitCandidateBlocks(caption, ocrText, options = {}) {
+  const includeCaptionBlocks = options.includeCaptionBlocks !== false;
+  const captionBlocks = includeCaptionBlocks
+    ? String(caption || "")
+        .split(/\n{2,}|[•·\-]{2,}/)
+        .map((x) => x.trim())
+        .filter(Boolean)
+    : [];
 
   const ocrBlocks = String(ocrText || "")
     .split(/\n{2,}/)
@@ -404,13 +454,20 @@ function buildBasePayload(post, ocrText, caption) {
 
 function buildEventFromChunk(post, chunk, context) {
   const parsedDate = parseEventDate(chunk, post.timestamp);
-  const hora = parseHour(chunk) || parseHour(context.fullText);
-  const ciudad = inferCity(post, `${chunk}\n${context.fullText}`);
-  const lugar = inferLugar(post, `${chunk}\n${context.fullText}`);
-  const categoria = inferCategory(`${chunk}\n${context.fullText}`, post.hashtags || []);
-  const isFree = inferIsFree(`${chunk}\n${context.fullText}`, post.hashtags || []);
-  const artista = inferArtist(`${chunk}\n${context.caption}`, post.mentions || []);
-  const tags = inferTags(`${chunk}\n${context.fullText}`, post.hashtags || [], categoria, isFree);
+  const hora = parseSlashHour(chunk) || parseHour(chunk);
+
+  const postForInference = context.isAgenda
+    ? { ...post, _ignorePostLocationForVenue: true }
+    : post;
+
+  const ciudad = inferCity(postForInference, `${chunk}\n${context.fullText}`, {
+    usePostLocation: !context.isAgenda,
+  });
+  const lugar = inferLugar(postForInference, `${chunk}\n${context.fullText}`);
+  const categoria = inferCategory(chunk, post.hashtags || []);
+  const isFree = inferIsFree(chunk, post.hashtags || []);
+  const artista = inferArtist(chunk, post.mentions || []);
+  const tags = inferTags(chunk, post.hashtags || [], categoria, isFree);
 
   return {
     categoria,
@@ -431,6 +488,90 @@ function buildEventFromChunk(post, chunk, context) {
     is_free: isFree,
     tags,
   };
+}
+
+function hasReadableSignal(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return false;
+  }
+
+  const alnum = (text.match(/[A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  const letters = (text.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  if (alnum < 6) {
+    return false;
+  }
+  return letters / alnum >= 0.6;
+}
+
+function cleanAgendaVenue(value) {
+  return String(value || "")
+    .replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, "")
+    .replace(/\bGRATIS\b/gi, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function extractAgendaEventsFromOcr(post, caption, ocrText) {
+  const lines = String(ocrText || "")
+    .split(/\n+/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const out = [];
+  const venueHourRegex = /([^/\n]{4,120})\s*\/\s*(\d{1,2})(?:[:.](\d{2}))?\s*hs\b/giu;
+
+  for (const line of lines) {
+    const lowered = line.toLowerCase();
+    if (/\b(dj|rave|trasnoche|cachengue|boliche|after|vermuteria|\bbar\b|\bclub\b|house\s+session)\b/i.test(lowered)) {
+      continue;
+    }
+
+    const parsedDate = parseEventDate(line, post.timestamp);
+    let match;
+    while ((match = venueHourRegex.exec(line)) !== null) {
+      const venueRaw = cleanAgendaVenue(match[1]);
+      if (!hasReadableSignal(venueRaw)) {
+        continue;
+      }
+
+      const hour = Number(match[2]);
+      const minute = Number(match[3] || "0");
+      if (!Number.isInteger(hour) || !Number.isInteger(minute)) {
+        continue;
+      }
+      if (hour < 0 || hour > 23 || minute < 0 || minute > 59) {
+        continue;
+      }
+
+      const hora = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
+      const categoria = inferCategory(line, post.hashtags || []);
+      const isFree = inferIsFree(line, post.hashtags || []);
+      const tags = inferTags(line, post.hashtags || [], categoria, isFree);
+
+      out.push({
+        categoria,
+        fecha_text: parsedDate.fechaText || asNullableString(post.timestamp),
+        hora,
+        ciudad: inferCity(post, `${line}\n${caption}`, { usePostLocation: false }),
+        lugar: venueRaw,
+        event_date: parsedDate.eventDate,
+        payload: {
+          ...buildBasePayload(post, ocrText, caption),
+          evidence_excerpt: excerpt(line, 400),
+        },
+        category_norm: normalizeToken(categoria) || "sin_categoria",
+        ciudad_norm: normalizeToken(inferCity(post, `${line}\n${caption}`, { usePostLocation: false })) || "rosario",
+        lugar_norm: normalizeToken(venueRaw),
+        tipo_norm: normalizeToken(categoria) || "evento",
+        artista_norm: normalizeToken(inferArtist(line, post.mentions || [])),
+        is_free: isFree,
+        tags,
+      });
+    }
+  }
+
+  return dedupeEvents(out);
 }
 
 function dedupeEvents(events) {
@@ -460,10 +601,22 @@ function extractEventsFromPost(post) {
     .filter(Boolean)
     .join("\n");
 
-  const blocks = splitCandidateBlocks(caption, ocrText);
+  const isAgenda = /\bagenda\b/i.test(caption) || ((post.childDisplayUrls || []).length >= 4);
+
+  if (isAgenda) {
+    const agendaEvents = extractAgendaEventsFromOcr(post, caption, ocrText);
+    if (agendaEvents.length > 0) {
+      return agendaEvents;
+    }
+  }
+
+  const blocks = splitCandidateBlocks(caption, ocrText, {
+    includeCaptionBlocks: !isAgenda,
+  });
   const context = {
     caption,
     fullText,
+    isAgenda,
     payloadBase: buildBasePayload(post, ocrText, caption),
   };
 
@@ -479,7 +632,21 @@ function extractEventsFromPost(post) {
     }
   }
 
-  return dedupeEvents(candidates);
+  const cleanedCandidates = candidates.filter((candidate) => {
+    const evidence = asNullableString(candidate.payload && candidate.payload.evidence_excerpt) || "";
+    const hasTime = Boolean(candidate.hora);
+    const hasVenueHint = /\b[A-ZÁÉÍÓÚÑ0-9 .&'\-]{3,}\s*\/\s*\d{1,2}(?:[:.]\d{2})?\s*hs\b/iu.test(evidence);
+    const hasCulturalHint = /\b(museo|teatro|centro cultural|feria|muestra|concierto|orquesta|planetario|biblioteca)\b/i.test(evidence);
+    const likelyNoise = /[|\\]{3,}|[“”"']{2,}|\b[a-z]{0,2}\d{4,}\b/i.test(evidence);
+
+    if (likelyNoise && !hasTime && !hasVenueHint && !hasCulturalHint) {
+      return false;
+    }
+
+    return hasTime || hasVenueHint || hasCulturalHint;
+  });
+
+  return dedupeEvents(cleanedCandidates.length > 0 ? cleanedCandidates : candidates);
 }
 
 module.exports = {

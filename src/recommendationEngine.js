@@ -18,6 +18,34 @@ function asOptionalBoolean(value, fieldName) {
   return value;
 }
 
+function looksReadableText(value) {
+  const text = asNonEmptyString(value);
+  if (!text) {
+    return false;
+  }
+
+  const alnum = (text.match(/[A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  const letters = (text.match(/[A-Za-zÁÉÍÓÚÑáéíóúñ]/g) || []).length;
+  if (alnum === 0) {
+    return false;
+  }
+
+  return letters / alnum >= 0.55;
+}
+
+function isNightlifeLike(event) {
+  const haystack = [event && event.title, event && event.venue, event && event.description]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+
+  if (!haystack) {
+    return false;
+  }
+
+  return /\b(dj|rave|trasnoche|cachengue|boliche|after|set\s*-?\s*dj|vermuteria|bar\b|club\b|house\s+session)\b/i.test(haystack);
+}
+
 function normalizeText(value) {
   return String(value || "")
     .toLowerCase()
@@ -136,6 +164,14 @@ function filterEvents(events, constraints) {
     }
 
     if (constraints.timeScope !== "none" && event.timeBucket !== constraints.timeScope) {
+      return false;
+    }
+
+    if (!looksReadableText(event.title)) {
+      return false;
+    }
+
+    if (isNightlifeLike(event)) {
       return false;
     }
 
