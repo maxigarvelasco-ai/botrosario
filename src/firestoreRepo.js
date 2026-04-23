@@ -363,6 +363,28 @@ function extractShortHeadline(value) {
     return null;
   }
 
+  const lines = text
+    .split(/\n+/)
+    .map((line) => line.replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, "").trim())
+    .filter(Boolean);
+
+  for (const line of lines) {
+    if (/\/(\s*)\d{1,2}(?:[:.]\d{2})?\s*hs\b/i.test(line)) {
+      continue;
+    }
+    if (line.length < 6 || line.length > 100) {
+      continue;
+    }
+    if (!isReadableTitleCandidate(line)) {
+      continue;
+    }
+    if (/^(gratis|\d+\b|planaxia\b)/i.test(line)) {
+      continue;
+    }
+
+    return line;
+  }
+
   const head = text.split("/")[0].trim();
   if (!head) {
     return null;
@@ -382,6 +404,11 @@ function extractShortHeadline(value) {
 
 function buildEventTitle(event) {
   const payload = event && typeof event.payload === "object" && event.payload !== null ? event.payload : {};
+
+  const agendaTitle = extractShortHeadline(payload.agenda_title);
+  if (agendaTitle) {
+    return compactText(agendaTitle, 140);
+  }
 
   const evidence = normalizeDisplayText(payload.evidence_excerpt);
   const shortHeadline = extractShortHeadline(evidence);

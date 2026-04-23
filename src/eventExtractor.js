@@ -506,10 +506,75 @@ function hasReadableSignal(value) {
 
 function cleanAgendaVenue(value) {
   return String(value || "")
+    .replace(/[€$£¥]/g, " ")
     .replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, "")
+    .replace(/^salida\s*:\s*/i, "")
+    .replace(/^lugar\s*:\s*/i, "")
     .replace(/\bGRATIS\b/gi, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function cleanAgendaTitle(value) {
+  return String(value || "")
+    .replace(/[€$£¥]/g, " ")
+    .replace(/^[^A-Za-z0-9ÁÉÍÓÚÑáéíóúñ]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function isAgendaHeaderLine(value) {
+  const text = String(value || "").trim();
+  if (!text) {
+    return true;
+  }
+
+  if (/\bagenda\b/i.test(text)) {
+    return true;
+  }
+
+  if (/\b(lunes|martes|miercoles|miércoles|jueves|viernes|sabado|sábado|domingo)\b/i.test(text)) {
+    return true;
+  }
+
+  return false;
+}
+
+function findAgendaTitleNearLine(lines, lineIndex, venueRaw) {
+  const venueToken = normalizeToken(venueRaw);
+
+  for (let offset = 1; offset <= 3; offset += 1) {
+    const idx = lineIndex - offset;
+    if (idx < 0) {
+      break;
+    }
+
+    const candidate = cleanAgendaTitle(lines[idx]);
+    if (!candidate) {
+      continue;
+    }
+
+    if (isAgendaHeaderLine(candidate)) {
+      continue;
+    }
+
+    if (/\/(\s*)\d{1,2}(?:[:.]\d{2})?\s*hs\b/i.test(candidate)) {
+      continue;
+    }
+
+    if (!hasReadableSignal(candidate)) {
+      continue;
+    }
+
+    const candidateToken = normalizeToken(candidate);
+    if (venueToken && candidateToken && venueToken === candidateToken) {
+      continue;
+    }
+
+    return candidate;
+  }
+
+  return null;
 }
 
 function extractAgendaEventsFromOcr(post, caption, ocrText) {
@@ -521,14 +586,18 @@ function extractAgendaEventsFromOcr(post, caption, ocrText) {
   const out = [];
   const venueHourRegex = /([^/\n]{4,120})\s*\/\s*(\d{1,2})(?:[:.](\d{2}))?\s*hs\b/giu;
 
-  for (const line of lines) {
+  for (let lineIndex = 0; lineIndex < lines.length; lineIndex += 1) {
+    const line = lines[lineIndex];
     const lowered = line.toLowerCase();
     if (/\b(dj|rave|trasnoche|cachengue|boliche|after|vermuteria|\bbar\b|\bclub\b|house\s+session)\b/i.test(lowered)) {
       continue;
     }
 
     const parsedDate = parseEventDate(line, post.timestamp);
+    const city = inferCity(post, `${line}\n${caption}`, { usePostLocation: false });
+
     let match;
+    venueHourRegex.lastIndex = 0;
     while ((match = venueHourRegex.exec(line)) !== null) {
       const venueRaw = cleanAgendaVenue(match[1]);
       if (!hasReadableSignal(venueRaw)) {
@@ -545,26 +614,33 @@ function extractAgendaEventsFromOcr(post, caption, ocrText) {
       }
 
       const hora = `${String(hour).padStart(2, "0")}:${String(minute).padStart(2, "0")}`;
-      const categoria = inferCategory(line, post.hashtags || []);
-      const isFree = inferIsFree(line, post.hashtags || []);
-      const tags = inferTags(line, post.hashtags || [], categoria, isFree);
+      const agendaTitle = findAgendaTitleNearLine(lines, lineIndex, venueRaw);
+      const enrichedEvidence = agendaTitle ? `${agendaTitle}\n${line}` : line;
+      const evidenceForInference = agendaTitle ? `${agendaTitle}\n${line}` : line;
+
+      const categoria = inferCategory(evidenceForInference, post.hashtags || []);
+      const isFree = inferIsFree(evidenceForInference, post.hashtags || []);
+      const tags = inferTags(evidenceForInference, post.hashtags || [], categoria, isFree);
+      const inferredArtist = inferArtist(evidenceForInference, post.mentions || []);
+      const artistaNorm = normalizeToken(agendaTitle) || normalizeToken(inferredArtist);
 
       out.push({
         categoria,
         fecha_text: parsedDate.fechaText || asNullableString(post.timestamp),
         hora,
-        ciudad: inferCity(post, `${line}\n${caption}`, { usePostLocation: false }),
+        ciudad: city,
         lugar: venueRaw,
         event_date: parsedDate.eventDate,
         payload: {
           ...buildBasePayload(post, ocrText, caption),
-          evidence_excerpt: excerpt(line, 400),
+          evidence_excerpt: excerpt(enrichedEvidence, 400),
+          agenda_title: agendaTitle,
         },
         category_norm: normalizeToken(categoria) || "sin_categoria",
-        ciudad_norm: normalizeToken(inferCity(post, `${line}\n${caption}`, { usePostLocation: false })) || "rosario",
+        ciudad_norm: normalizeToken(city) || "rosario",
         lugar_norm: normalizeToken(venueRaw),
         tipo_norm: normalizeToken(categoria) || "evento",
-        artista_norm: normalizeToken(inferArtist(line, post.mentions || [])),
+        artista_norm: artistaNorm,
         is_free: isFree,
         tags,
       });
